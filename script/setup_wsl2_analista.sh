@@ -663,7 +663,7 @@ main() {
   setup_docker
   setup_databases
   setup_productivity
-  setup_jupyter
+  # setup_jupyter
   setup_folders
   setup_wsl_config
   setup_vscode_list
