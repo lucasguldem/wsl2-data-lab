@@ -1,0 +1,79 @@
+{
+    // ⚡ TERMINAL INTEGRADO ⚡
+    "terminal.integrated.defaultProfile.linux": "zsh", // Define o Zsh como shell padrão
+    "terminal.integrated.fontFamily": "JetBrainsMono Nerd Font", // Usa a fonte Nerd Font no terminal
+    "terminal.integrated.fontSize": 14, // Define o tamanho da fonte do terminal
+    "terminal.integrated.cursorStyle": "block", // Define o cursor como bloco
+    "terminal.integrated.cursorBlinking": true, // Ativa a piscagem do cursor
+    "terminal.integrated.smoothScrolling": true, // Habilita rolagem suave no terminal
+    "terminal.integrated.profiles.linux": {
+        "zsh (WSL)": {
+            "path": "/usr/bin/zsh",
+            "args": []
+        }
+    },
+    // ⚡ EDITOR - MESMA FONTE DO TERMINAL + FONT LIGATURES ⚡
+    "editor.fontFamily": "'JetBrainsMono Nerd Font', Consolas, 'Courier New', monospace", // Usa a mesma fonte do terminal no editor
+    "editor.fontSize": 14, // Define o tamanho da fonte do editor
+    "editor.fontLigatures": true, // Ativa ligaduras de fonte para símbolos como =>, ===, etc.
+    "editor.wordWrap": "on", // Ativa quebra de linha automática
+    "editor.quickSuggestions": {
+        "other": true,
+        "comments": false,
+        "strings": true
+    },
+    // ⚡ PERSONALIZAÇÃO DE TEMA ⚡
+    "workbench.colorTheme": "OM Theme (Default Dracula Italic)", // Define o tema de cores
+    "workbench.iconTheme": "material-icon-theme", // Define o tema de ícones
+    // ⚡ CONFIGURAÇÕES DO JAVA ⚡
+    "java.configuration.runtimes": [
+        {
+            "name": "JavaSE-17",
+            "path": "/usr/lib/jvm/java-17-openjdk-amd64",
+            "default": true
+        }
+    ],
+    "java.home": "/usr/lib/jvm/java-17-openjdk-amd64", // Define o Java 17 como padrão
+    "java.format.settings.url": "https://raw.githubusercontent.com/redhat-developer/vscode-java/master/java-formatter.xml", // Configuração de formatação do Java
+    "java.format.settings.profile": "GoogleStyle", // Usa o estilo de formatação do Google
+    "maven.terminal.useJavaHome": true,
+    // ⚡ CONFIGURAÇÃO DO MAVEN ⚡
+    "maven.executable.path": "/usr/share/maven/bin/mvn", // Define o caminho do executável do Maven
+    // ⚡ ASSOCIAÇÃO DE TIPOS DE ARQUIVOS ⚡
+    "files.associations": {
+        "*.html": "html", // Arquivos HTML
+        "*.css": "css", // Arquivos CSS
+        "*.js": "javascript", // Arquivos JavaScript
+        "*.ts": "typescript", // Arquivos TypeScript
+        "*.json": "json", // Arquivos JSON
+        // 📌 Arquivos de Python
+        "*.py": "python", // Código-fonte Python
+        "requirements.txt": "pip-requirements", // Dependências do Python
+        "Pipfile": "pipfile", // Arquivo de dependências do Pipenv
+        "*.ipynb": "jupyter", // Notebooks do Jupyter
+        // 📌 Arquivos de Java
+        "*.java": "java", // Código-fonte Java
+        "pom.xml": "xml", // Configuração do Maven
+        "*.gradle": "groovy", // Scripts do Gradle
+        "*.jar": "binary" // Arquivos compilados do Java
+    },
+    // ⚡ FORMATAÇÃO AUTOMÁTICA ⚡
+    "editor.formatOnSave": true, // Formata o código ao salvar
+    "editor.formatOnPaste": true, // Formata o código ao colar
+    "editor.formatOnType": true, // Formata o código enquanto digita
+    "debug.inlineValues": "on", // Melhor experiência de depuração
+    // ⚡ CONFIGURAÇÕES DO INTELLICODE ⚡
+    "vsintellicode.modify.editor.suggestSelection": "automaticallyOverrodeDefaultValue", // Ajuste automático de sugestões
+    "editor.suggestSelection": "first",
+    "git.autofetch": true,
+    "git.openRepositoryInParentFolders": "always",
+    "security.workspace.trust.untrustedFiles": "open",
+    "tabnine.experimentalAutoImports": true,
+    "database-client.autoSync": true,
+    "redhat.telemetry.enabled": false,
+    "workbench.statusBar.visible": true,
+    "explorer.compactFolders": false,
+    "chat.mcp.gallery.enabled": true,
+    "diffEditor.maxComputationTime": 0,
+    "svg.preview.mode": "svg" // Sugestão automática ao digitar
+}
