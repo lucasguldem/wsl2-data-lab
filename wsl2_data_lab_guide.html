@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WSL2 Data Lab — Setup v2</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #080b10;
+      --bg2: #0e1219;
+      --bg3: #141820;
+      --border: #1e2533;
+      --border2: #252d3d;
+      --green: #00e5a0;
+      --green-dim: rgba(0, 229, 160, .12);
+      --green-glow: rgba(0, 229, 160, .25);
+      --blue: #3d8bff;
+      --blue-dim: rgba(61, 139, 255, .1);
+      --purple: #a78bfa;
+      --purple-dim: rgba(167, 139, 250, .1);
+      --yellow: #fbbf24;
+      --yellow-dim: rgba(251, 191, 36, .1);
+      --red: #f87171;
+      --text: #c9d1e0;
+      --text-dim: #5a6478;
+      --text-bright: #eef2ff;
+      --mono: 'Space Mono', monospace;
+      --sans: 'DM Sans', sans-serif;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.65;
+      overflow-x: hidden;
+    }
+
+    /* Animated grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0, 229, 160, .025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 229, 160, .025) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Glow orbs */
+    .orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      z-index: 0;
+      animation: drift 20s ease-in-out infinite;
+    }
+
+    .orb-1 {
+      width: 500px;
+      height: 500px;
+      background: rgba(0, 229, 160, .06);
+      top: -100px;
+      left: -150px;
+      animation-delay: 0s;
+    }
+
+    .orb-2 {
+      width: 400px;
+      height: 400px;
+      background: rgba(61, 139, 255, .05);
+      bottom: -100px;
+      right: -100px;
+      animation-delay: -10s;
+    }
+
+    @keyframes drift {
+
+      0%,
+      100% {
+        transform: translate(0, 0) scale(1);
+      }
+
+      33% {
+        transform: translate(30px, 20px) scale(1.05);
+      }
+
+      66% {
+        transform: translate(-20px, 30px) scale(0.95);
+      }
+    }
+
+    .wrap {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 28px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ── NAV ────────────────────────────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(8, 11, 16, .85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 0;
+    }
+
+    .nav-inner {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 28px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .nav-logo {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--green);
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-logo::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: blink 2s infinite;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .2
+      }
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 4px;
+      list-style: none;
+      margin-left: auto;
+      flex-wrap: wrap;
+    }
+
+    .nav-links a {
+      font-size: 12px;
+      font-family: var(--mono);
+      color: var(--text-dim);
+      text-decoration: none;
+      padding: 5px 10px;
+      border-radius: 6px;
+      transition: color .2s, background .2s;
+    }
+
+    .nav-links a:hover {
+      color: var(--green);
+      background: var(--green-dim);
+    }
+
+    /* ── HERO ───────────────────────────────────────────────────── */
+    .hero {
+      padding: 80px 0 60px;
+      text-align: center;
+    }
+
+    .version-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--green);
+      background: var(--green-dim);
+      border: 1px solid rgba(0, 229, 160, .2);
+      padding: 5px 14px;
+      border-radius: 100px;
+      margin-bottom: 28px;
+      letter-spacing: .06em;
+    }
+
+    .hero-ascii {
+      font-family: var(--mono);
+      font-size: clamp(5px, 1.4vw, 12px);
+      line-height: 1.2;
+      color: var(--green);
+      opacity: .55;
+      margin-bottom: 28px;
+      white-space: pre;
+      letter-spacing: .05em;
+    }
+
+    h1 {
+      font-family: var(--sans);
+      font-size: clamp(2rem, 5vw, 3.6rem);
+      font-weight: 600;
+      line-height: 1.1;
+      color: var(--text-bright);
+      margin-bottom: 16px;
+      letter-spacing: -.02em;
+    }
+
+    h1 em {
+      font-style: normal;
+      color: var(--green);
+    }
+
+    .hero-sub {
+      color: var(--text-dim);
+      font-size: 1.05rem;
+      max-width: 520px;
+      margin: 0 auto 44px;
+    }
+
+    /* Quick start terminal */
+    .terminal {
+      background: var(--bg2);
+      border: 1px solid var(--border2);
+      border-radius: 12px;
+      overflow: hidden;
+      max-width: 620px;
+      margin: 0 auto;
+      text-align: left;
+    }
+
+    .terminal-bar {
+      background: var(--bg3);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+    }
+
+    .dot-r {
+      background: #ff5f57;
+    }
+
+    .dot-y {
+      background: #ffbd2e;
+    }
+
+    .dot-g {
+      background: #27c93f;
+    }
+
+    .terminal-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-left: auto;
+    }
+
+    .terminal-body {
+      padding: 20px 20px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 2;
+    }
+
+    .tl {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .tl-prompt {
+      color: var(--green);
+      user-select: none;
+    }
+
+    .tl-comment {
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
+    .tl-cmd {
+      color: var(--text-bright);
+      flex: 1;
+    }
+
+    .copy-row {
+      display: flex;
+      justify-content: flex-end;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .btn-copy {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--green);
+      background: var(--green-dim);
+      border: 1px solid rgba(0, 229, 160, .2);
+      padding: 5px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+
+    .btn-copy:hover {
+      background: rgba(0, 229, 160, .2);
+    }
+
+    .btn-copy.done {
+      color: #27c93f;
+    }
+
+    /* ── SECTION ─────────────────────────────────────────────────── */
+    section {
+      padding: 64px 0;
+    }
+
+    .sec-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--green);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      font-size: 1.75rem;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 32px;
+      letter-spacing: -.02em;
+    }
+
+    /* ── WHAT'S NEW ──────────────────────────────────────────────── */
+    .new-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .new-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .25s, transform .2s;
+    }
+
+    .new-card:hover {
+      border-color: var(--border2);
+      transform: translateY(-2px);
+    }
+
+    .new-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+    }
+
+    .new-card.green::before {
+      background: var(--green);
+    }
+
+    .new-card.blue::before {
+      background: var(--blue);
+    }
+
+    .new-card.purple::before {
+      background: var(--purple);
+    }
+
+    .new-card.yellow::before {
+      background: var(--yellow);
+    }
+
+    .new-icon {
+      font-size: 1.5rem;
+      margin-bottom: 10px;
+    }
+
+    .new-title {
+      font-weight: 600;
+      color: var(--text-bright);
+      font-size: .95rem;
+      margin-bottom: 6px;
+    }
+
+    .new-desc {
+      font-size: .83rem;
+      color: var(--text-dim);
+      line-height: 1.55;
+    }
+
+    /* ── MODULES GRID ─────────────────────────────────────────────── */
+    .modules-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      gap: 14px;
+    }
+
+    .mod-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      cursor: pointer;
+      transition: border-color .25s, transform .2s;
+      position: relative;
+    }
+
+    .mod-card:hover {
+      border-color: var(--border2);
+      transform: translateY(-2px);
+    }
+
+    .mod-card.active {
+      border-color: rgba(0, 229, 160, .4);
+    }
+
+    .mod-card.active::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--green);
+      border-radius: 12px 12px 0 0;
+    }
+
+    .mod-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .mod-num {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+
+    .mod-card.active .mod-num {
+      color: var(--green);
+      border-color: rgba(0, 229, 160, .3);
+      background: var(--green-dim);
+    }
+
+    .mod-icon {
+      font-size: 1.15rem;
+    }
+
+    .mod-name {
+      font-weight: 500;
+      font-size: .92rem;
+      color: var(--text-bright);
+    }
+
+    .mod-desc {
+      font-size: .8rem;
+      color: var(--text-dim);
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      background: var(--bg3);
+    }
+
+    .tag.py {
+      color: var(--blue);
+      border-color: rgba(61, 139, 255, .25);
+      background: var(--blue-dim);
+    }
+
+    .tag.sh {
+      color: var(--green);
+      border-color: rgba(0, 229, 160, .25);
+      background: var(--green-dim);
+    }
+
+    .tag.db {
+      color: var(--yellow);
+      border-color: rgba(251, 191, 36, .25);
+      background: var(--yellow-dim);
+    }
+
+    .tag.ml {
+      color: var(--purple);
+      border-color: rgba(167, 139, 250, .25);
+      background: var(--purple-dim);
+    }
+
+    /* ── PACKAGES ─────────────────────────────────────────────────── */
+    .pkg-group {
+      margin-bottom: 10px;
+    }
+
+    .pkg-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 18px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      cursor: pointer;
+      user-select: none;
+      transition: border-color .2s;
+    }
+
+    .pkg-header:hover {
+      border-color: var(--border2);
+    }
+
+    .pkg-header.open {
+      border-radius: 10px 10px 0 0;
+      border-color: var(--border2);
+    }
+
+    .pkg-header-icon {
+      font-size: 1rem;
+    }
+
+    .pkg-header-name {
+      font-weight: 500;
+      font-size: .9rem;
+      color: var(--text-bright);
+      flex: 1;
+    }
+
+    .pkg-header-count {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .pkg-chevron {
+      font-size: 10px;
+      color: var(--text-dim);
+      transition: transform .3s;
+    }
+
+    .pkg-header.open .pkg-chevron {
+      transform: rotate(90deg);
+    }
+
+    .pkg-body {
+      display: none;
+      padding: 14px 18px;
+      background: var(--bg2);
+      border: 1px solid var(--border2);
+      border-top: none;
+      border-radius: 0 0 10px 10px;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .pkg-body.open {
+      display: flex;
+    }
+
+    .chip {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 5px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text);
+      transition: border-color .2s, color .2s;
+      cursor: default;
+    }
+
+    .chip:hover {
+      border-color: var(--blue);
+      color: var(--blue);
+    }
+
+    .chip.pinned {
+      border-color: rgba(251, 191, 36, .3);
+      color: var(--yellow);
+      background: var(--yellow-dim);
+    }
+
+    /* ── PIPELINE / COMPAT NOTE ─────────────────────────────────── */
+    .compat-note {
+      background: rgba(251, 191, 36, .07);
+      border: 1px solid rgba(251, 191, 36, .2);
+      border-radius: 10px;
+      padding: 14px 18px;
+      font-size: .83rem;
+      color: #d4a000;
+      margin-bottom: 20px;
+      display: flex;
+      gap: 10px;
+    }
+
+    /* ── TREE ─────────────────────────────────────────────────────── */
+    .tree {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px 28px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 2.1;
+    }
+
+    .td {
+      color: var(--blue);
+    }
+
+    .tc {
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
+    .tf {
+      color: var(--text-dim);
+    }
+
+    /* ── SMOKE TESTS ─────────────────────────────────────────────── */
+    .smoke-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 12px;
+    }
+
+    .smoke-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .smoke-label {
+      font-size: .8rem;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .smoke-cmd {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--green);
+      background: var(--green-dim);
+      padding: 6px 10px;
+      border-radius: 6px;
+      word-break: break-all;
+    }
+
+    /* ── CHECKLIST ────────────────────────────────────────────────── */
+    .progress-wrap {
+      background: var(--bg3);
+      height: 3px;
+      border-radius: 100px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--green), var(--blue));
+      border-radius: 100px;
+      transition: width .4s cubic-bezier(.4, 0, .2, 1);
+      width: 0%;
+    }
+
+    .progress-meta {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+
+    .checklist {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ci {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 13px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+    }
+
+    .ci:hover {
+      border-color: var(--border2);
+    }
+
+    .ci.done {
+      border-color: rgba(0, 229, 160, .2);
+      background: rgba(0, 229, 160, .03);
+    }
+
+    .ci-box {
+      width: 18px;
+      height: 18px;
+      border: 1.5px solid var(--border2);
+      border-radius: 5px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      transition: all .2s;
+    }
+
+    .ci.done .ci-box {
+      background: var(--green);
+      border-color: var(--green);
+      color: var(--bg);
+    }
+
+    .ci-label {
+      flex: 1;
+      font-size: .88rem;
+    }
+
+    .ci.done .ci-label {
+      color: var(--text-dim);
+      text-decoration: line-through;
+    }
+
+    .ci-cmd {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      background: var(--bg3);
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+
+    /* ── ALIASES ──────────────────────────────────────────────────── */
+    .alias-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+    }
+
+    .alias-group {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .alias-group-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      padding: 9px 14px;
+      background: var(--bg3);
+      border-bottom: 1px solid var(--border);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .alias-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .alias-row:last-child {
+      border-bottom: none;
+    }
+
+    .alias-key {
+      color: var(--green);
+      min-width: 60px;
+    }
+
+    .alias-val {
+      color: var(--text-dim);
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ── FOOTER ───────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    footer span {
+      color: var(--green);
+    }
+
+    /* Divider */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border2), transparent);
+      margin: 0;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-inner">
+      <div class="nav-logo">WSL2 Data Lab · v2</div>
+      <ul class="nav-links">
+        <li><a href="#novo">Novo</a></li>
+        <li><a href="#modulos">Módulos</a></li>
+        <li><a href="#pacotes">Pacotes</a></li>
+        <li><a href="#estrutura">Estrutura</a></li>
+        <li><a href="#checklist">Checklist</a></li>
+        <li><a href="#aliases">Aliases</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <div class="wrap">
+    <div class="hero">
+      <div class="version-pill">🚀 Versão 2 — Spinners · Smoke Tests · JupyterLab 4.x</div>
+      <pre class="hero-ascii">██████╗  █████╗ ████████╗ █████╗     ██╗      █████╗ ██████╗
+██╔══██╗██╔══██╗╚══██╔══╝██╔══██╗    ██║     ██╔══██╗██╔══██╗
+██║  ██║███████║   ██║   ███████║    ██║     ███████║██████╔╝
+██║  ██║██╔══██║   ██║   ██╔══██║    ██║     ██╔══██║██╔══██╗
+██████╔╝██║  ██║   ██║   ██║  ██║    ███████╗██║  ██║██████╔╝
+╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═╝╚═════╝</pre>
+      <h1>Ambiente de <em>Dados</em><br>no Windows</h1>
+      <p class="hero-sub">Python · SQL · Docker · JupyterLab 4.x · dbt · Rust CLI — instalados com um único script.</p>
+
+      <div class="terminal">
+        <div class="terminal-bar">
+          <div class="dot dot-r"></div>
+          <div class="dot dot-y"></div>
+          <div class="dot dot-g"></div>
+          <div class="terminal-title">Ubuntu (WSL2)</div>
+        </div>
+        <div class="terminal-body">
+          <div class="tl">
+            <span class="tl-prompt">$</span>
+            <span class="tl-cmd">wget -O setup.sh
+              https://raw.githubusercontent.com/seu-usuario/wsl2-data-lab/main/setup_wsl2_analista.sh</span>
+          </div>
+          <div class="tl">
+            <span class="tl-prompt">$</span>
+            <span class="tl-cmd">chmod +x setup.sh && ./setup.sh</span>
+          </div>
+          <div class="tl">
+            <span class="tl-prompt" style="color:var(--text-dim)">→</span>
+            <span class="tl-comment">Deseja continuar? [s/N]: <strong style="color:var(--green)">s</strong></span>
+          </div>
+        </div>
+        <div class="copy-row">
+          <button class="btn-copy" id="copy-btn" onclick="copyCmd()">📋 Copiar comando</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- WHAT'S NEW -->
+  <div class="wrap" id="novo">
+    <section>
+      <div class="sec-label">// novidades</div>
+      <h2>O que há de novo na v2</h2>
+      <div class="new-grid">
+        <div class="new-card green">
+          <div class="new-icon">⠋</div>
+          <div class="new-title">Feedback Visual em Tempo Real</div>
+          <div class="new-desc">Spinners animados para operações longas, barras de progresso por grupo de pacotes e
+            timestamps ao final de cada módulo.</div>
+        </div>
+        <div class="new-card blue">
+          <div class="new-icon">🪐</div>
+          <div class="new-title">JupyterLab 4.x — Reescrito</div>
+          <div class="new-desc">Extensões compatíveis com Lab 4.x (<code>jupyterlab-lsp≥5.0</code>), instalação em
+            batches, smoke tests automáticos ao final: version, kernelspec e import do pylsp.</div>
+        </div>
+        <div class="new-card purple">
+          <div class="new-icon">📌</div>
+          <div class="new-title">Conflitos de Dependências Resolvidos</div>
+          <div class="new-desc">Pins explícitos para <code>rich&lt;15.0</code> (prefect 3.x) e
+            <code>pathspec&lt;0.13</code> (dbt-core 1.x). Grupos instalados na ordem correta.
+          </div>
+        </div>
+        <div class="new-card yellow">
+          <div class="new-icon">🔍</div>
+          <div class="new-title">Verificações Inteligentes</div>
+          <div class="new-desc">Antes de reinstalar qualquer ferramenta, o script verifica se já está presente. Espaço
+            em disco e internet são checados antes de iniciar.</div>
+        </div>
+        <div class="new-card green">
+          <div class="new-icon">📋</div>
+          <div class="new-title">Sumário Final de Falhas</div>
+          <div class="new-desc">Ao término, exibe três seções: versões instaladas, itens ignorados (já existentes) e
+            falhas não-críticas com referência ao log.</div>
+        </div>
+        <div class="new-card blue">
+          <div class="new-icon">🟩</div>
+          <div class="new-title">Correção nvm + set -u</div>
+          <div class="new-desc">O bloco nvm desabilita <code>set -u</code> durante todo o escopo, corrigindo o erro
+            "unbound variable" com arrays no Bash 5.0 (Ubuntu 20.04+).</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- MODULES -->
+  <div class="wrap" id="modulos">
+    <section>
+      <div class="sec-label">// instalação</div>
+      <h2>13 Módulos de Setup</h2>
+      <div class="modules-grid" id="modules-grid"></div>
+    </section>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- PACKAGES -->
+  <div class="wrap" id="pacotes">
+    <section>
+      <div class="sec-label">// dependências</div>
+      <h2>Pacotes Python</h2>
+
+      <div class="compat-note">
+        <span>⚠️</span>
+        <div><strong>Compatibilidade (resolvida na v2):</strong> <code>prefect 3.x</code> exige
+          <code>rich&lt;15.0</code> e <code>dbt-core 1.x</code> exige <code>pathspec&lt;0.13</code>. Os chips marcados
+          em amarelo indicam pins explícitos já aplicados pelo script.
+        </div>
+      </div>
+
+      <div id="pkg-list"></div>
+    </section>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- JUPYTER SMOKE TESTS -->
+  <div class="wrap">
+    <section>
+      <div class="sec-label">// módulo 10</div>
+      <h2>JupyterLab 4.x — Smoke Tests</h2>
+      <p style="color:var(--text-dim); margin-bottom:28px; font-size:.9rem;">Ao final do módulo 10, o script executa
+        três verificações automáticas para confirmar que o ambiente está funcional:</p>
+      <div class="smoke-grid">
+        <div class="smoke-card">
+          <div class="smoke-label">✅ Versão instalada</div>
+          <div class="smoke-cmd">jupyter lab --version</div>
+        </div>
+        <div class="smoke-card">
+          <div class="smoke-label">✅ Kernel Python registrado</div>
+          <div class="smoke-cmd">jupyter kernelspec list</div>
+        </div>
+        <div class="smoke-card">
+          <div class="smoke-label">✅ Backend LSP importável</div>
+          <div class="smoke-cmd">python3 -c "import pylsp"</div>
+        </div>
+        <div class="smoke-card">
+          <div class="smoke-label">🚀 Iniciar JupyterLab</div>
+          <div class="smoke-cmd">jlab # alias criado em ~/.local/bin</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- FOLDER STRUCTURE -->
+  <div class="wrap" id="estrutura">
+    <section>
+      <div class="sec-label">// módulo 11</div>
+      <h2>Estrutura de Pastas</h2>
+      <div class="tree">
+        <span class="td">~/data-projects/</span>
+        ├── <span class="td">notebooks/</span> <span class="tc"># análises exploratórias (.ipynb)</span>
+        ├── <span class="td">data/</span>
+        │ ├── <span class="td">raw/</span> <span class="tc"># dados brutos — não commitar!</span>
+        │ ├── <span class="td">processed/</span> <span class="tc"># dados tratados e limpos</span>
+        │ └── <span class="td">external/</span> <span class="tc"># fontes externas</span>
+        ├── <span class="td">scripts/</span> <span class="tc"># ETL e automações (.py)</span>
+        ├── <span class="td">reports/</span> <span class="tc"># outputs finais (PDF, HTML, imagens)</span>
+        ├── <span class="td">dashboards/</span> <span class="tc"># apps Streamlit / Dash</span>
+        ├── <span class="td">models/</span> <span class="tc"># artefatos ML treinados (.pkl, .pt)</span>
+        └── <span class="tf">template_projeto.ipynb</span> <span class="tc"># notebook base</span>
+      </div>
+      <p style="margin-top:16px; font-size:.83rem; color:var(--text-dim);">Um <code>.gitignore_global</code> é
+        configurado automaticamente para ignorar <code>data/raw/</code>, <code>data/processed/</code>,
+        <code>.venv/</code>, <code>*.csv</code>, <code>*.parquet</code> e checkpoints do Jupyter.
+      </p>
+    </section>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- CHECKLIST -->
+  <div class="wrap" id="checklist">
+    <section>
+      <div class="sec-label">// pós-instalação</div>
+      <h2>Checklist de Finalização</h2>
+      <div class="progress-meta" id="prog-label">0 / 8 concluídos</div>
+      <div class="progress-wrap">
+        <div class="progress-fill" id="prog-fill"></div>
+      </div>
+      <div class="checklist" id="checklist-el"></div>
+    </section>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ALIASES -->
+  <div class="wrap" id="aliases">
+    <section>
+      <div class="sec-label">// produtividade</div>
+      <h2>Aliases e Funções (.zshrc)</h2>
+      <div class="alias-grid" id="alias-grid"></div>
+    </section>
+  </div>
+
+  <div class="divider"></div>
+
+  <footer>
+    <div class="wrap">
+      WSL2 Data Lab · <span>v2</span> · 2026 — feito com 🐧 para analistas que usam Windows
+    </div>
+  </footer>
+
+  <script>
+    // ── DATA ─────────────────────────────────────────────────────────────────
+    const modules = [
+      { num: '01', icon: '🔧', name: 'Sistema Base', desc: 'Atualiza Ubuntu, instala dependências de compilação, utilitários e fontes.', tags: ['sh'] },
+      { num: '02', icon: '🐚', name: 'Zsh + Oh-My-Zsh', desc: 'Powerlevel10k, zsh-autosuggestions, zsh-syntax-highlighting. Gera ~/.zshrc completo.', tags: ['sh'] },
+      { num: '03', icon: '🐍', name: 'Python 3.12 via pyenv', desc: 'Compila Python 3.12.3. Atualiza pip, setuptools e wheel. Idempotente.', tags: ['py', 'sh'] },
+      { num: '04', icon: '📊', name: 'Pacotes de Dados', desc: '+30 libs em 9 grupos com barras de progresso individuais. Conflitos resolvidos com pins.', tags: ['py', 'ml'] },
+      { num: '05', icon: '🟩', name: 'Node.js via nvm', desc: 'LTS via nvm. Instala yarn, pnpm, TypeScript, prettier, eslint. Bug set -u corrigido.', tags: ['sh'] },
+      { num: '06', icon: '🦀', name: 'Rust + CLI Tools', desc: 'ripgrep, bat, lsd, fd, delta, bottom, dust, tokei, hyperfine.', tags: ['sh'] },
+      { num: '07', icon: '🐳', name: 'Docker Engine', desc: 'Docker CE + Compose Plugin. Verifica se já está instalado antes de reconfigurar.', tags: ['sh', 'db'] },
+      { num: '08', icon: '🗄️', name: 'Bancos de Dados', desc: 'PostgreSQL 16, Redis, SQLite3, DuckDB CLI. Smoke test SELECT 42 ao final.', tags: ['db'] },
+      { num: '09', icon: '⚡', name: 'Produtividade CLI', desc: 'fzf, tmux configurado, git + delta com side-by-side, aliases globais.', tags: ['sh'] },
+      { num: '10', icon: '🪐', name: 'JupyterLab 4.x', desc: 'Reescrito. Extensões compatíveis com Lab 4.x, batches essencial/opcional, 3 smoke tests.', tags: ['py'] },
+      { num: '11', icon: '📁', name: 'Estrutura de Pastas', desc: '~/data-projects com notebooks, data, scripts, reports, models. .gitignore_global.', tags: ['sh'] },
+      { num: '12', icon: '⚙️', name: 'Configuração WSL2', desc: 'systemd habilitado, hostname data-lab. Gera ~/wslconfig_tip.txt para o Windows.', tags: ['sh'] },
+      { num: '13', icon: '💻', name: 'VS Code Extensions', desc: 'Script ~/vscode_extensions_data.sh com 20+ extensões: Python, Jupyter, dbt, Docker...', tags: ['sh'] },
+    ];
+
+    const packages = [
+      { icon: '🔢', name: 'Núcleo de Dados', pkgs: ['numpy', 'pandas', 'polars', 'pyarrow'] },
+      { icon: '📈', name: 'Visualização', pkgs: ['matplotlib', 'seaborn', 'plotly', 'altair', 'bokeh'] },
+      { icon: '🪐', name: 'Jupyter (core)', pkgs: ['jupyterlab>=4.0', 'notebook', 'ipywidgets', 'ipykernel', 'nbformat', 'nbconvert', 'jupyterlab-git'] },
+      { icon: '🔬', name: 'JupyterLab (extensões)', pkgs: ['jupyterlab-lsp>=5.0', 'python-lsp-server[all]', 'jupyterlab_code_formatter', 'black', 'isort', 'theme-darcula', 'nbdime'] },
+      { icon: '🤖', name: 'Machine Learning', pkgs: ['scikit-learn', 'xgboost', 'lightgbm', 'torch (CPU)', 'torchvision'] },
+      { icon: '📐', name: 'Estatística', pkgs: ['scipy', 'statsmodels'] },
+      { icon: '🗄️', name: 'SQL & Bancos', pkgs: ['sqlalchemy', 'psycopg2-binary', 'pymysql', 'duckdb'] },
+      { icon: '☁️', name: 'Big Data & Cloud', pkgs: ['pyspark', 'boto3', 'google-cloud-bigquery'] },
+      {
+        icon: '🔄', name: 'ELT & Orquestração', pkgs: ['pathspec>=0.9,<0.13', 'dbt-core', 'dbt-postgres', 'dbt-bigquery', 'prefect', 'apache-airflow'],
+        pinned: ['pathspec>=0.9,<0.13']
+      },
+      { icon: '✅', name: 'Qualidade de Dados', pkgs: ['great-expectations', 'pandera'] },
+      { icon: '🌐', name: 'APIs & Web', pkgs: ['requests', 'httpx', 'fastapi', 'uvicorn'] },
+      {
+        icon: '🛠️', name: 'Utilitários', pkgs: ['python-dotenv', 'pydantic', 'rich<15.0', 'typer', 'tqdm', 'openpyxl', 'xlrd', 'loguru', 'black', 'ruff', 'mypy', 'pytest'],
+        pinned: ['rich<15.0']
+      },
+    ];
+
+    const checks = [
+      { label: 'Reiniciar terminal após instalação', cmd: 'exec zsh' },
+      { label: 'Configurar nome do Git', cmd: 'git config --global user.name "Seu Nome"' },
+      { label: 'Configurar email do Git', cmd: 'git config --global user.email "email"' },
+      { label: 'Criar .wslconfig no Windows', cmd: 'ver ~/wslconfig_tip.txt' },
+      { label: 'Testar JupyterLab no navegador', cmd: 'jlab' },
+      { label: 'Instalar extensões do VS Code', cmd: 'bash ~/vscode_extensions_data.sh' },
+      { label: 'Verificar Docker', cmd: 'docker run hello-world' },
+      { label: 'Testar DuckDB CLI', cmd: "duckdb :memory: \"SELECT 42\"" },
+    ];
+
+    const aliases = [
+      {
+        group: 'Python / Jupyter',
+        rows: [
+          ['py', 'python3'], ['pip', 'pip3'],
+          ['jn', 'jupyter notebook'], ['jl', 'jupyter lab'],
+          ['jlab', '~/.local/bin/jlab'], ['act', 'source .venv/bin/activate'],
+        ]
+      },
+      {
+        group: 'Git',
+        rows: [
+          ['gs', 'git status'], ['ga', 'git add .'],
+          ['gc', 'git commit -m'], ['gp', 'git push'], ['gl', 'git log --oneline'],
+        ]
+      },
+      {
+        group: 'Docker',
+        rows: [
+          ['dps', 'docker ps'], ['dimg', 'docker images'], ['dprune', 'docker system prune -f'],
+        ]
+      },
+      {
+        group: 'dbt',
+        rows: [
+          ['dbt-run', 'dbt run'], ['dbt-test', 'dbt test'],
+        ]
+      },
+      {
+        group: 'Funções',
+        rows: [
+          ['mkcd', 'mkdir -p $1 && cd $1'], ['venv', 'python3 -m venv .venv && source...'],
+          ['csvhead', 'head -1 $1 | tr , \\\\n | nl'],
+        ]
+      },
+    ];
+
+    // ── RENDER MODULES ───────────────────────────────────────────────────────
+    function renderModules() {
+      const el = document.getElementById('modules-grid');
+      el.innerHTML = modules.map(m => `
+        <div class="mod-card" onclick="this.classList.toggle('active')">
+          <div class="mod-head">
+            <span class="mod-num">${m.num}</span>
+            <span class="mod-icon">${m.icon}</span>
+            <span class="mod-name">${m.name}</span>
+          </div>
+          <div class="mod-desc">${m.desc}</div>
+          <div class="tags">
+            ${m.tags.map(t => `<span class="tag ${t}">${t === 'py' ? 'Python' : t === 'sh' ? 'Shell' : t === 'db' ? 'Database' : 'ML'}</span>`).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // ── RENDER PACKAGES ──────────────────────────────────────────────────────
+    function renderPackages() {
+      const el = document.getElementById('pkg-list');
+      el.innerHTML = packages.map((cat, i) => {
+        const chips = cat.pkgs.map(p => {
+          const isPinned = (cat.pinned || []).includes(p);
+          return `<span class="chip${isPinned ? ' pinned' : ''}" title="${isPinned ? 'pin de compatibilidade' : ''}">${p}</span>`;
+        }).join('');
+        return `
+          <div class="pkg-group">
+            <div class="pkg-header" id="ph-${i}" onclick="togglePkg(${i})">
+              <span class="pkg-header-icon">${cat.icon}</span>
+              <span class="pkg-header-name">${cat.name}</span>
+              <span class="pkg-header-count">${cat.pkgs.length} pacotes</span>
+              <span class="pkg-chevron">▶</span>
+            </div>
+            <div class="pkg-body" id="pb-${i}">${chips}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function togglePkg(i) {
+      const h = document.getElementById(`ph-${i}`);
+      const b = document.getElementById(`pb-${i}`);
+      h.classList.toggle('open');
+      b.classList.toggle('open');
+    }
+
+    // ── RENDER CHECKLIST ─────────────────────────────────────────────────────
+    function renderChecklist() {
+      const el = document.getElementById('checklist-el');
+      el.innerHTML = checks.map((c, i) => `
+        <div class="ci" id="ci-${i}" onclick="toggleCheck(${i})">
+          <div class="ci-box" id="cb-${i}"></div>
+          <span class="ci-label">${c.label}</span>
+          <span class="ci-cmd">${c.cmd}</span>
+        </div>
+      `).join('');
+    }
+
+    function toggleCheck(i) {
+      document.getElementById(`ci-${i}`).classList.toggle('done');
+      document.getElementById(`cb-${i}`).textContent =
+        document.getElementById(`ci-${i}`).classList.contains('done') ? '✓' : '';
+      updateProgress();
+    }
+
+    function updateProgress() {
+      const done = document.querySelectorAll('.ci.done').length;
+      const total = checks.length;
+      document.getElementById('prog-fill').style.width = (done / total * 100) + '%';
+      document.getElementById('prog-label').textContent = `${done} / ${total} concluídos`;
+    }
+
+    // ── RENDER ALIASES ───────────────────────────────────────────────────────
+    function renderAliases() {
+      const el = document.getElementById('alias-grid');
+      el.innerHTML = aliases.map(g => `
+        <div class="alias-group">
+          <div class="alias-group-title">${g.group}</div>
+          ${g.rows.map(([k, v]) => `
+            <div class="alias-row">
+              <span class="alias-key">${k}</span>
+              <span class="alias-val">${v}</span>
+            </div>
+          `).join('')}
+        </div>
+      `).join('');
+    }
+
+    // ── COPY COMMAND ─────────────────────────────────────────────────────────
+    function copyCmd() {
+      const cmd = 'wget -O setup.sh https://raw.githubusercontent.com/seu-usuario/wsl2-data-lab/main/setup_wsl2_analista.sh && chmod +x setup.sh && ./setup.sh';
+      navigator.clipboard.writeText(cmd).then(() => {
+        const btn = document.getElementById('copy-btn');
+        btn.textContent = '✓ Copiado!';
+        btn.classList.add('done');
+        setTimeout(() => { btn.textContent = '📋 Copiar comando'; btn.classList.remove('done'); }, 2000);
+      });
+    }
+
+    // ── INIT ─────────────────────────────────────────────────────────────────
+    renderModules();
+    renderPackages();
+    renderChecklist();
+    renderAliases();
+  </script>
+</body>
+
+</html>
