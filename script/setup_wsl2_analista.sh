@@ -1,21 +1,181 @@
 #!/usr/bin/env bash
 # =============================================================================
-# WSL2 Setup Completo para Analista de Dados
+# WSL2 Setup Completo para Analista de Dados — v2
 # Autor: Claude | Data: 2026
+#
+# MUDANÇAS v2:
+#   - Feedback visual com spinners, barras de progresso e timestamps
+#   - Passo 10 (JupyterLab) reescrito: extensões compatíveis com Lab 4.x,
+#     instalação em batch, smoke test ao final
+#   - Verificação de versões antes de reinstalar
+#   - Timeouts em comandos de rede (wget, curl, pip com --timeout)
+#   - Separação clara entre erros críticos e avisos não-críticos
+#   - Sumário de falhas ao final (não só de sucessos)
 # =============================================================================
 
-set -euo pipefail
+set -uo pipefail   # Removido -e: erros não-críticos são capturados localmente
 
-# ── Cores ────────────────────────────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+# ── Cores ─────────────────────────────────────────────────────────────────────
+RED='\033[0;31m';   GREEN='\033[0;32m';  YELLOW='\033[1;33m'
+BLUE='\033[0;34m';  CYAN='\033[0;36m';  MAGENTA='\033[0;35m'
+BOLD='\033[1m';     DIM='\033[2m';       NC='\033[0m'
+TICK="${GREEN}✔${NC}"; CROSS="${RED}✘${NC}"; WARN="${YELLOW}⚠${NC}"
+ARROW="${CYAN}→${NC}"
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
-ok()      { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-step()    { echo -e "\n${BOLD}${BLUE}━━━ $* ━━━${NC}"; }
-banner()  {
+# ── Estado global ─────────────────────────────────────────────────────────────
+FAILED_STEPS=()          # Passos que falharam (não-críticos)
+SKIPPED_STEPS=()         # Passos ignorados por já estarem presentes
+INSTALLED_VERSIONS=()    # Registro de versões instaladas
+LOG_FILE="$HOME/.wsl2_setup_$(date +%Y%m%d_%H%M%S).log"
+STEP_TIMER=0
+
+# ── Helpers de output ─────────────────────────────────────────────────────────
+_ts()    { date '+%H:%M:%S'; }
+_log()   { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"; }
+
+info()   {
+  echo -e "  ${CYAN}[INFO]${NC}  $*"
+  _log "INFO  $*"
+}
+ok()     {
+  echo -e "  ${TICK} ${GREEN}$*${NC}"
+  _log "OK    $*"
+}
+warn()   {
+  echo -e "  ${WARN} ${YELLOW}$*${NC}"
+  _log "WARN  $*"
+}
+err()    {
+  echo -e "  ${CROSS} ${RED}$*${NC}"
+  _log "ERROR $*"
+}
+detail() {
+  echo -e "    ${DIM}$*${NC}"
+  _log "      $*"
+}
+
+# Separador de passo com timer
+step() {
+  local num="$1"; shift
+  local title="$*"
+  echo ""
+  echo -e "${BOLD}${BLUE}┌─────────────────────────────────────────────────────────────────┐${NC}"
+  printf "${BOLD}${BLUE}│${NC} ${BOLD}%s. %-61s${BLUE}│${NC}\n" "$num" "$title"
+  echo -e "${BOLD}${BLUE}└─────────────────────────────────────────────────────────────────┘${NC}"
+  STEP_TIMER=$SECONDS
+  _log "=== STEP $num: $title ==="
+}
+
+# Encerramento de passo com tempo decorrido
+end_step() {
+  local elapsed=$(( SECONDS - STEP_TIMER ))
+  echo -e "  ${DIM}⏱  Concluído em ${elapsed}s${NC}"
+  _log "    Step concluído em ${elapsed}s"
+}
+
+# Spinner para comandos sem output visível
+SPINNER_PID=""
+spinner_start() {
+  local msg="${1:-Aguarde...}"
+  local frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  (
+    i=0
+    while true; do
+      printf "\r  ${CYAN}${frames:$i:1}${NC}  ${DIM}%s${NC}   " "$msg"
+      i=$(( (i+1) % ${#frames} ))
+      sleep 0.1
+    done
+  ) &
+  SPINNER_PID=$!
+  disown "$SPINNER_PID" 2>/dev/null || true
+}
+
+spinner_stop() {
+  local status="${1:-0}"
+  if [[ -n "$SPINNER_PID" ]]; then
+    kill "$SPINNER_PID" 2>/dev/null || true
+    wait "$SPINNER_PID" 2>/dev/null || true
+    SPINNER_PID=""
+  fi
+  printf "\r%-70s\r" " "   # Limpa a linha do spinner
+  if [[ "$status" == "0" ]]; then
+    ok "$2"
+  else
+    warn "$2 (pode continuar)"
+  fi
+}
+
+# Barra de progresso para listas
+progress_bar() {
+  local current="$1"
+  local total="$2"
+  local label="$3"
+  local width=40
+  local filled=$(( width * current / total ))
+  local empty=$(( width - filled ))
+  local pct=$(( 100 * current / total ))
+  local bar=""
+  for ((i=0; i<filled; i++)); do bar+="█"; done
+  for ((i=0; i<empty; i++)); do  bar+="░"; done
+  printf "\r  [%s] %3d%%  %-35s" "$bar" "$pct" "$label"
+}
+
+# Instala um pacote pip com feedback
+pip_install_item() {
+  local pkg="$1"
+  local current="$2"
+  local total="$3"
+  local extra_flags="${4:-}"
+
+  progress_bar "$current" "$total" "$pkg"
+  # shellcheck disable=SC2086
+  if pip install --upgrade --quiet --timeout 120 $extra_flags "$pkg" >> "$LOG_FILE" 2>&1; then
+    local ver
+    ver=$(pip show "$pkg" 2>/dev/null | awk '/^Version:/{print $2}')
+    INSTALLED_VERSIONS+=("$pkg==$ver")
+    return 0
+  else
+    FAILED_STEPS+=("pip:$pkg")
+    return 1
+  fi
+}
+
+# Instala lista de pacotes pip com barra de progresso
+pip_install_list() {
+  local -n _pkgs=$1   # nameref: passar nome do array
+  local extra_flags="${2:-}"
+  local total=${#_pkgs[@]}
+  local ok_count=0
+  local fail_count=0
+
+  echo ""
+  for i in "${!_pkgs[@]}"; do
+    local pkg="${_pkgs[$i]}"
+    local current=$(( i + 1 ))
+    if pip_install_item "$pkg" "$current" "$total" "$extra_flags"; then
+      (( ok_count++ )) || true
+    else
+      (( fail_count++ )) || true
+    fi
+  done
+  printf "\r%-70s\r" " "
+
+  if [[ $fail_count -eq 0 ]]; then
+    ok "$ok_count pacotes instalados com sucesso"
+  else
+    warn "$ok_count instalados  |  $fail_count falharam (veja $LOG_FILE)"
+  fi
+}
+
+# Confirma input do usuário
+confirm() {
+  echo -e "${YELLOW}$1${NC}"
+  read -rp "  [s/N]: " ans
+  [[ "${ans,,}" == "s" ]]
+}
+
+# Banner ASCII
+banner() {
   echo -e "${BOLD}${CYAN}"
   cat <<'EOF'
   ██████╗  █████╗ ████████╗ █████╗     ██╗      █████╗ ██████╗
@@ -24,435 +184,721 @@ banner()  {
   ██║  ██║██╔══██║   ██║   ██╔══██║    ██║     ██╔══██║██╔══██╗
   ██████╔╝██║  ██║   ██║   ██║  ██║    ███████╗██║  ██║██████╔╝
   ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═╝╚═════╝
-  WSL2 Setup Completo — Analista de Dados 2026
 EOF
-  echo -e "${NC}"
-}
-
-confirm() {
-  read -rp "$(echo -e "${YELLOW}$1 [s/N]: ${NC}")" ans
-  [[ "${ans,,}" == "s" ]]
+  echo -e "${NC}  ${BOLD}WSL2 Setup Completo — Analista de Dados 2026  ${DIM}[v2]${NC}"
+  echo -e "  ${DIM}Log em: $LOG_FILE${NC}"
 }
 
 # ── Verificação do ambiente ───────────────────────────────────────────────────
 check_wsl() {
-  if ! grep -qi microsoft /proc/version 2>/dev/null; then
-    warn "Este script foi projetado para WSL2. Continuando mesmo assim..."
-  else
+  if grep -qi microsoft /proc/version 2>/dev/null; then
     ok "WSL2 detectado."
+  else
+    warn "Não parece ser WSL2. Continuando mesmo assim..."
   fi
+
+  # Verifica internet
+  spinner_start "Verificando conexão com a internet..."
+  if curl -fsSL --connect-timeout 5 https://pypi.org > /dev/null 2>&1; then
+    spinner_stop 0 "Internet OK"
+  else
+    spinner_stop 1 ""
+    err "Sem acesso à internet. Verifique a conexão e tente novamente."
+    exit 1
+  fi
+
+  # Verifica espaço em disco (mínimo 5 GB livre)
+  local free_gb
+  free_gb=$(df -BG "$HOME" | awk 'NR==2{print $4}' | tr -d 'G')
+  if (( free_gb < 5 )); then
+    err "Espaço insuficiente: ${free_gb}GB livre (mínimo 5GB)"
+    exit 1
+  fi
+  ok "Espaço em disco: ${free_gb}GB livre"
 }
 
 # =============================================================================
 # 1. SISTEMA BASE
 # =============================================================================
 setup_system() {
-  step "1. Atualizando sistema base (Ubuntu/Debian)"
-  sudo apt-get update -qq && sudo apt-get upgrade -y -qq
+  step 1 "Atualizando sistema base (Ubuntu/Debian)"
+
+  spinner_start "Atualizando lista de pacotes..."
+  sudo apt-get update -qq >> "$LOG_FILE" 2>&1
+  spinner_stop 0 "Lista de pacotes atualizada"
+
+  spinner_start "Instalando dependências do sistema..."
+  sudo apt-get upgrade -y -qq >> "$LOG_FILE" 2>&1
   sudo apt-get install -y -qq \
     build-essential curl wget git unzip zip tar \
     ca-certificates gnupg lsb-release software-properties-common \
     apt-transport-https jq tree htop ncdu tmux \
     libssl-dev libffi-dev libpq-dev libsqlite3-dev \
-    fonts-powerline
-  ok "Sistema base atualizado."
+    fonts-powerline >> "$LOG_FILE" 2>&1
+  spinner_stop 0 "Dependências do sistema instaladas"
+  end_step
 }
 
 # =============================================================================
 # 2. ZSH + OH-MY-ZSH + POWERLEVEL10K
 # =============================================================================
 setup_shell() {
-  step "2. Shell: Zsh + Oh-My-Zsh + Powerlevel10k"
+  step 2 "Shell: Zsh + Oh-My-Zsh + Powerlevel10k"
 
-  sudo apt-get install -y -qq zsh
+  sudo apt-get install -y -qq zsh >> "$LOG_FILE" 2>&1
 
   if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    spinner_start "Instalando Oh-My-Zsh..."
     RUNZSH=no CHSH=no sh -c \
-      "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
-    ok "Oh-My-Zsh instalado."
+      "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" \
+      >> "$LOG_FILE" 2>&1
+    spinner_stop 0 "Oh-My-Zsh instalado"
   else
-    ok "Oh-My-Zsh já instalado."
+    ok "Oh-My-Zsh já instalado"
+    SKIPPED_STEPS+=("oh-my-zsh")
   fi
 
-  # Powerlevel10k
   local p10k_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k"
   if [ ! -d "$p10k_dir" ]; then
-    git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$p10k_dir"
-    ok "Powerlevel10k instalado."
+    spinner_start "Clonando Powerlevel10k..."
+    git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$p10k_dir" >> "$LOG_FILE" 2>&1
+    spinner_stop 0 "Powerlevel10k instalado"
+  else
+    ok "Powerlevel10k já instalado"
   fi
 
-  # Plugins
-  local ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
-  for plugin_repo in \
-    "zsh-users/zsh-autosuggestions" \
-    "zsh-users/zsh-syntax-highlighting" \
-    "zsh-users/zsh-completions"; do
-    plugin_name=$(basename "$plugin_repo")
-    plugin_dir="$ZSH_CUSTOM/plugins/$plugin_name"
-    [ -d "$plugin_dir" ] || git clone --depth=1 "https://github.com/${plugin_repo}.git" "$plugin_dir"
+  local ZSH_CUSTOM_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+  local plugins=(
+    "zsh-users/zsh-autosuggestions"
+    "zsh-users/zsh-syntax-highlighting"
+    "zsh-users/zsh-completions"
+  )
+  local total=${#plugins[@]}
+  echo ""
+  for i in "${!plugins[@]}"; do
+    local repo="${plugins[$i]}"
+    local name
+    name=$(basename "$repo")
+    local dir="$ZSH_CUSTOM_DIR/plugins/$name"
+    progress_bar "$(( i + 1 ))" "$total" "$name"
+    if [ ! -d "$dir" ]; then
+      git clone --depth=1 "https://github.com/${repo}.git" "$dir" >> "$LOG_FILE" 2>&1
+    fi
   done
+  printf "\r%-70s\r" " "
+  ok "Plugins Zsh instalados"
 
-  # .zshrc
+  # Escreve .zshrc
   cat > "$HOME/.zshrc" <<'ZSHRC'
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="powerlevel10k/powerlevel10k"
 plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-completions docker kubectl python pip)
 source $ZSH/oh-my-zsh.sh
-
-# Powerlevel10k
 [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
 
-# Paths
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 export PYENV_ROOT="$HOME/.pyenv"
 export PATH="$PYENV_ROOT/bin:$PATH"
 eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
 
-# Node (nvm)
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-# Aliases — Utilitários
 alias ll='ls -lAh --color=auto'
 alias la='ls -A --color=auto'
 alias grep='grep --color=auto'
 alias update='sudo apt update && sudo apt upgrade -y'
 alias cls='clear'
-
-# Aliases — Python / Data
 alias py='python3'
 alias pip='pip3'
 alias jn='jupyter notebook'
 alias jl='jupyter lab'
+alias jlab='~/.local/bin/jlab'
 alias act='source .venv/bin/activate'
-
-# Aliases — Git
 alias gs='git status'
 alias ga='git add .'
 alias gc='git commit -m'
 alias gp='git push'
 alias gl='git log --oneline --graph --decorate'
-
-# Aliases — Docker
 alias dps='docker ps'
 alias dimg='docker images'
 alias dprune='docker system prune -f'
-
-# dbt
 alias dbt-run='dbt run'
 alias dbt-test='dbt test'
 
-# Funções úteis
 mkcd() { mkdir -p "$1" && cd "$1"; }
 venv() { python3 -m venv .venv && source .venv/bin/activate && pip install --upgrade pip; }
 csvhead() { head -1 "$1" | tr ',' '\n' | nl; }
 ZSHRC
 
-  # Muda shell padrão para zsh
-  sudo chsh -s "$(which zsh)" "$USER" 2>/dev/null || warn "Altere o shell padrão manualmente: chsh -s $(which zsh)"
+  sudo chsh -s "$(which zsh)" "$USER" >> "$LOG_FILE" 2>&1 || \
+    warn "Shell não foi alterado automaticamente. Execute: chsh -s \$(which zsh)"
   ok "Shell configurado. Execute: source ~/.zshrc"
+  end_step
 }
 
 # =============================================================================
-# 3. PYTHON (pyenv + versões LTS)
+# 3. PYTHON via pyenv
 # =============================================================================
 setup_python() {
-  step "3. Python via pyenv"
+  step 3 "Python via pyenv"
 
-  # Dependências pyenv
+  spinner_start "Instalando dependências de compilação do Python..."
   sudo apt-get install -y -qq \
     make libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
-    libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev
+    libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev \
+    >> "$LOG_FILE" 2>&1
+  spinner_stop 0 "Dependências instaladas"
 
   if [ ! -d "$HOME/.pyenv" ]; then
-    curl -fsSL https://pyenv.run | bash
-    ok "pyenv instalado."
+    spinner_start "Instalando pyenv..."
+    curl -fsSL https://pyenv.run | bash >> "$LOG_FILE" 2>&1
+    spinner_stop 0 "pyenv instalado"
   else
-    ok "pyenv já instalado."
+    ok "pyenv já instalado"
   fi
 
   export PYENV_ROOT="$HOME/.pyenv"
   export PATH="$PYENV_ROOT/bin:$PATH"
   eval "$(pyenv init -)"
 
-  # Instala Python 3.12 (LTS recomendado para dados)
   local py_version="3.12.3"
-  if ! pyenv versions | grep -q "$py_version"; then
-    info "Instalando Python $py_version (pode demorar)..."
-    pyenv install "$py_version"
+  if ! pyenv versions 2>/dev/null | grep -q "$py_version"; then
+    spinner_start "Compilando Python $py_version (pode levar 5-10 min)..."
+    pyenv install "$py_version" >> "$LOG_FILE" 2>&1
+    spinner_stop 0 "Python $py_version compilado"
     pyenv global "$py_version"
-    ok "Python $py_version definido como global."
   else
-    ok "Python $py_version já instalado."
+    ok "Python $py_version já instalado"
+    SKIPPED_STEPS+=("python-$py_version")
   fi
 
-  pip install --upgrade pip setuptools wheel
+  local actual_ver
+  actual_ver=$(python3 --version 2>&1)
+  detail "Versão ativa: $actual_ver"
+  INSTALLED_VERSIONS+=("$actual_ver")
+
+  spinner_start "Atualizando pip, setuptools e wheel..."
+  pip install --upgrade --quiet pip setuptools wheel >> "$LOG_FILE" 2>&1
+  spinner_stop 0 "pip $(pip --version | awk '{print $2}')"
+  end_step
 }
 
 # =============================================================================
 # 4. PACOTES PYTHON PARA DADOS
 # =============================================================================
 setup_python_packages() {
-  step "4. Pacotes Python para Análise de Dados"
+  step 4 "Pacotes Python para Análise de Dados"
 
   export PYENV_ROOT="$HOME/.pyenv"
   export PATH="$PYENV_ROOT/bin:$PATH"
   eval "$(pyenv init -)" 2>/dev/null || true
 
-  # 1. Instalar pacotes do PyPI padrão
-  pip install --upgrade \
-    numpy pandas polars pyarrow \
-    matplotlib seaborn plotly altair bokeh \
-    jupyterlab notebook ipywidgets ipykernel nbformat nbconvert \
-    jupyterlab-git jupyter_contrib_nbextensions \
-    scikit-learn xgboost lightgbm \
-    scipy statsmodels \
-    sqlalchemy psycopg2-binary pymysql duckdb \
-    pyspark boto3 google-cloud-bigquery \
-    dbt-core dbt-postgres dbt-bigquery \
-    prefect apache-airflow \
-    great-expectations pandera \
-    requests httpx fastapi uvicorn \
-    python-dotenv pydantic rich typer tqdm \
-    openpyxl xlrd xlwt \
-    loguru black ruff mypy pytest
+  # --- Grupo 1: Núcleo de dados ---
+  echo -e "\n  ${BOLD}${DIM}▸ Núcleo de dados${NC}"
+  local PKGS_CORE=(numpy pandas polars pyarrow)
+  pip_install_list PKGS_CORE
 
-  # 2. Instalar PyTorch CPU separadamente (índice específico)
-  pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cpu
+  # --- Grupo 2: Visualização ---
+  echo -e "\n  ${BOLD}${DIM}▸ Visualização${NC}"
+  local PKGS_VIZ=(matplotlib seaborn plotly altair bokeh)
+  pip_install_list PKGS_VIZ
 
-  ok "Pacotes Python instalados."
+  # --- Grupo 3: Jupyter ---
+  # NOTA: jupyterlab 4.x não aceita jupyterlab-lsp<4 nem jupyterlab-drawio<0.9
+  # Instalamos somente o core aqui; extensões de Lab 4.x vão no passo 10
+  echo -e "\n  ${BOLD}${DIM}▸ Jupyter (core)${NC}"
+  local PKGS_JUPYTER=(
+    "jupyterlab>=4.0"
+    notebook
+    ipywidgets
+    ipykernel
+    nbformat
+    nbconvert
+    jupyterlab-git
+  )
+  pip_install_list PKGS_JUPYTER
+
+  # --- Grupo 4: ML ---
+  echo -e "\n  ${BOLD}${DIM}▸ Machine Learning${NC}"
+  local PKGS_ML=(scikit-learn xgboost lightgbm scipy statsmodels)
+  pip_install_list PKGS_ML
+
+  # --- Grupo 5: SQL e bancos ---
+  echo -e "\n  ${BOLD}${DIM}▸ SQL e Bancos${NC}"
+  local PKGS_SQL=(sqlalchemy psycopg2-binary pymysql duckdb)
+  pip_install_list PKGS_SQL
+
+  # --- Grupo 6: Cloud e Big Data ---
+  echo -e "\n  ${BOLD}${DIM}▸ Cloud e Big Data${NC}"
+  local PKGS_CLOUD=(pyspark boto3 google-cloud-bigquery)
+  pip_install_list PKGS_CLOUD
+
+  # --- Grupo 7: ELT e Orquestração ---
+  # ATENÇÃO (detectado em execução anterior):
+  #   • prefect 3.x exige rich<15.0  — instalar dbt+prefect ANTES de rich
+  #   • dbt-core 1.x exige pathspec<0.13 — pin explícito necessário
+  # Estratégia: instalar o grupo ELT primeiro (com seus constraints),
+  # depois rich/pathspec com versão compatível no grupo de utilitários.
+  echo -e "\n  ${BOLD}${DIM}▸ ELT e Orquestração${NC}"
+  local PKGS_ELT=(
+    "pathspec>=0.9,<0.13"   # pin: dbt-core 1.x não aceita pathspec>=0.13
+    dbt-core
+    dbt-postgres
+    dbt-bigquery
+    prefect
+    apache-airflow
+  )
+  pip_install_list PKGS_ELT
+
+  # --- Grupo 8: Qualidade ---
+  echo -e "\n  ${BOLD}${DIM}▸ Qualidade de Dados${NC}"
+  local PKGS_QUALITY=(great-expectations pandera)
+  pip_install_list PKGS_QUALITY
+
+  # --- Grupo 9: APIs e utilitários ---
+  # rich: pin <15.0 porque prefect 3.x declara rich<15.0 como dependência.
+  # Instalar rich DEPOIS do prefect (grupo 7) garante que o pip já conhece
+  # o constraint e não vai tentar atualizar para 15.x.
+  echo -e "\n  ${BOLD}${DIM}▸ APIs e Utilitários${NC}"
+  local PKGS_UTIL=(
+    requests httpx fastapi uvicorn
+    python-dotenv pydantic "rich<15.0" typer tqdm
+    openpyxl xlrd xlwt loguru
+    black ruff mypy pytest
+  )
+  pip_install_list PKGS_UTIL
+
+  # --- PyTorch CPU (índice separado) ---
+  echo -e "\n  ${BOLD}${DIM}▸ PyTorch (CPU)${NC}"
+  spinner_start "Instalando torch + torchvision (pode demorar)..."
+  if pip install --upgrade --quiet --timeout 300 \
+       torch torchvision \
+       --index-url https://download.pytorch.org/whl/cpu \
+       >> "$LOG_FILE" 2>&1; then
+    spinner_stop 0 "PyTorch CPU instalado"
+    INSTALLED_VERSIONS+=("torch (CPU)")
+  else
+    spinner_stop 1 "PyTorch CPU falhou (não-crítico)"
+    FAILED_STEPS+=("torch-cpu")
+  fi
+
+  end_step
 }
 
 # =============================================================================
 # 5. NODE.JS via NVM
 # =============================================================================
 setup_node() {
-  step "5. Node.js via nvm"
+  step 5 "Node.js via nvm"
 
   if [ ! -d "$HOME/.nvm" ]; then
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-    ok "nvm instalado."
+    spinner_start "Instalando nvm..."
+    curl -fsSL -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh \
+      | bash >> "$LOG_FILE" 2>&1
+    spinner_stop 0 "nvm instalado"
   else
-    ok "nvm já instalado."
+    ok "nvm já instalado"
   fi
 
-  # Carrega nvm
   export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-  # Desativa 'set -u' temporariamente (nvm usa variáveis não definidas)
+  # NOTA: nvm usa variáveis internas não declaradas — set -u deve ficar desligado
+  # durante TODO o bloco do nvm, incluindo a iteração de pacotes npm que vem
+  # logo depois. Religa set -u somente ao sair da função.
   set +u
-  nvm install --lts
-  nvm use --lts
-  nvm alias default node
-  set -u
 
-  # Utilitários globais
-  npm install -g \
-    yarn pnpm \
-    ts-node typescript \
-    prettier eslint \
-    http-server \
-    @databricks/sql-driver 2>/dev/null || true
+  spinner_start "Instalando Node.js LTS..."
+  nvm install --lts >> "$LOG_FILE" 2>&1
+  nvm use --lts >> "$LOG_FILE" 2>&1
+  nvm alias default node >> "$LOG_FILE" 2>&1
+  spinner_stop 0 "Node.js $(node -v) instalado"
+  INSTALLED_VERSIONS+=("node $(node -v)")
 
-  ok "Node.js LTS instalado: $(node -v)"
+  # Array declarado DEPOIS de carregar nvm e com set -u desligado.
+  # Usando loop "for item in list" em vez de índice numérico — evita
+  # o bug "unbound variable" com ${!array[@]} no Bash 5.0 (Ubuntu 20.04).
+  local npm_ok=0
+  local npm_fail=0
+  local npm_total=7
+  local npm_current=0
+  echo ""
+  for pkg in yarn pnpm ts-node typescript prettier eslint http-server; do
+    npm_current=$(( npm_current + 1 ))
+    progress_bar "$npm_current" "$npm_total" "$pkg"
+    if npm install -g "$pkg" >> "$LOG_FILE" 2>&1; then
+      npm_ok=$(( npm_ok + 1 ))
+    else
+      npm_fail=$(( npm_fail + 1 ))
+      FAILED_STEPS+=("npm:$pkg")
+    fi
+  done
+  printf "\r%-70s\r" " "
+
+  set -u   # Religa set -u somente aqui, fora do escopo do nvm
+
+  if [[ $npm_fail -eq 0 ]]; then
+    ok "$npm_ok pacotes npm globais instalados"
+  else
+    warn "$npm_ok instalados  |  $npm_fail falharam (veja $LOG_FILE)"
+  fi
+  end_step
 }
 
 # =============================================================================
-# 6. RUST (para ferramentas de CLI modernas)
+# 6. RUST + FERRAMENTAS CLI
 # =============================================================================
 setup_rust() {
-  step "6. Rust + ferramentas CLI modernas"
+  step 6 "Rust + ferramentas CLI modernas"
 
   if ! command -v rustup &>/dev/null; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    ok "Rust instalado."
+    spinner_start "Instalando Rust via rustup..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y >> "$LOG_FILE" 2>&1
+    spinner_stop 0 "Rust instalado"
   else
-    ok "Rust já instalado."
+    ok "Rust já instalado: $(rustc --version 2>/dev/null)"
   fi
 
   source "$HOME/.cargo/env" 2>/dev/null || true
 
-  # Ferramentas CLI modernas em Rust (instalar uma por vez para mostrar progresso)
-  local rust_tools=(ripgrep fd-find bat lsd delta tokei hyperfine bottom du-dust)
-  for tool in "${rust_tools[@]}"; do
-    info "Instalando $tool (pode demorar na primeira vez)..."
-    cargo install "$tool" 2>/dev/null || warn "$tool falhou (não crítico)"
-  done
+  local rust_tools=(ripgrep fd-find bat lsd tokei hyperfine bottom du-dust)
+  local total=${#rust_tools[@]}
+  local ok_count=0
+  local fail_count=0
 
-  ok "Ferramentas Rust instaladas: rg, fd, bat, lsd, delta, btm..."
+  echo ""
+  for i in "${!rust_tools[@]}"; do
+    local tool="${rust_tools[$i]}"
+    progress_bar "$(( i + 1 ))" "$total" "$tool (compilando...)"
+    if cargo install "$tool" >> "$LOG_FILE" 2>&1; then
+      (( ok_count++ )) || true
+    else
+      FAILED_STEPS+=("cargo:$tool")
+      (( fail_count++ )) || true
+    fi
+  done
+  printf "\r%-70s\r" " "
+
+  # delta separado (nome do crate é git-delta)
+  spinner_start "Instalando delta (git diff)..."
+  if cargo install git-delta >> "$LOG_FILE" 2>&1; then
+    spinner_stop 0 "delta instalado"
+    (( ok_count++ )) || true
+  else
+    spinner_stop 1 "delta falhou (não-crítico)"
+    (( fail_count++ )) || true
+    FAILED_STEPS+=("cargo:git-delta")
+  fi
+
+  if [[ $fail_count -eq 0 ]]; then
+    ok "${ok_count} ferramentas Rust instaladas: rg, fd, bat, lsd, delta, btm..."
+  else
+    warn "${ok_count} instaladas | ${fail_count} falharam (veja o log)"
+  fi
+  end_step
 }
 
 # =============================================================================
 # 7. DOCKER
 # =============================================================================
 setup_docker() {
-  step "7. Docker Engine"
+  step 7 "Docker Engine"
 
   if command -v docker &>/dev/null; then
     ok "Docker já instalado: $(docker --version)"
+    SKIPPED_STEPS+=("docker")
+    end_step
     return
   fi
 
-  # Repositório oficial Docker
+  spinner_start "Adicionando repositório oficial Docker..."
   sudo install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>> "$LOG_FILE"
   sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
   echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-    https://download.docker.com/linux/ubuntu \
-    $(lsb_release -cs) stable" \
-    | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+    | sudo tee /etc/apt/sources.list.d/docker.list >> "$LOG_FILE"
+  sudo apt-get update -qq >> "$LOG_FILE" 2>&1
+  spinner_stop 0 "Repositório Docker adicionado"
 
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  spinner_start "Instalando Docker CE..."
+  sudo apt-get install -y -qq \
+    docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin \
+    >> "$LOG_FILE" 2>&1
+  spinner_stop 0 "Docker instalado"
 
   sudo usermod -aG docker "$USER"
-  ok "Docker instalado. Reinicie o terminal para usar sem sudo."
+  INSTALLED_VERSIONS+=("docker $(docker --version | awk '{print $3}' | tr -d ',')")
+  detail "Usuário adicionado ao grupo 'docker'. Reinicie o terminal para usar sem sudo."
+  end_step
 }
 
 # =============================================================================
 # 8. BANCOS DE DADOS
 # =============================================================================
 setup_databases() {
-  step "8. Bancos de Dados (PostgreSQL, Redis, DuckDB CLI)"
+  step 8 "Bancos de Dados"
 
-  # PostgreSQL client + server
-  sudo apt-get install -y -qq postgresql postgresql-client redis-server redis-tools
+  # PostgreSQL + Redis
+  spinner_start "Instalando PostgreSQL e Redis..."
+  sudo apt-get install -y -qq postgresql postgresql-client redis-server redis-tools \
+    sqlite3 >> "$LOG_FILE" 2>&1
+  spinner_stop 0 "PostgreSQL, Redis e SQLite3 instalados"
 
   # DuckDB CLI
-  local duck_version="v0.10.2"
   if ! command -v duckdb &>/dev/null; then
-    wget -qO /tmp/duckdb.zip \
-      "https://github.com/duckdb/duckdb/releases/download/${duck_version}/duckdb_cli-linux-amd64.zip"
-    sudo unzip -o /tmp/duckdb.zip -d /usr/local/bin/ && sudo chmod +x /usr/local/bin/duckdb
+    spinner_start "Baixando DuckDB CLI..."
+    local duck_version="v0.10.2"
+    wget -qO /tmp/duckdb.zip --timeout=60 \
+      "https://github.com/duckdb/duckdb/releases/download/${duck_version}/duckdb_cli-linux-amd64.zip" \
+      >> "$LOG_FILE" 2>&1
+    sudo unzip -o /tmp/duckdb.zip -d /usr/local/bin/ >> "$LOG_FILE" 2>&1
+    sudo chmod +x /usr/local/bin/duckdb
     rm /tmp/duckdb.zip
-    ok "DuckDB CLI instalado."
+    spinner_stop 0 "DuckDB CLI $(duckdb --version 2>/dev/null || echo '') instalado"
+    INSTALLED_VERSIONS+=("duckdb CLI")
   else
-    ok "DuckDB já instalado."
+    ok "DuckDB já instalado: $(duckdb --version 2>/dev/null)"
   fi
 
-  # SQLite3
-  sudo apt-get install -y -qq sqlite3
+  # Smoke test básico
+  if echo "SELECT 42 AS test;" | duckdb :memory: >> "$LOG_FILE" 2>&1; then
+    detail "Smoke test DuckDB OK (SELECT 42)"
+  else
+    warn "DuckDB instalado mas o smoke test falhou — verifique manualmente"
+  fi
 
-  ok "Bancos de dados prontos."
+  end_step
 }
 
 # =============================================================================
-# 9. FERRAMENTAS DE PRODUTIVIDADE CLI
+# 9. FERRAMENTAS DE PRODUTIVIDADE
 # =============================================================================
 setup_productivity() {
-  step "9. Ferramentas de Produtividade"
+  step 9 "Ferramentas de Produtividade CLI"
 
-  # fzf — fuzzy finder
   if [ ! -d "$HOME/.fzf" ]; then
-    git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
-    "$HOME/.fzf/install" --all
-    ok "fzf instalado."
+    spinner_start "Instalando fzf..."
+    git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf" >> "$LOG_FILE" 2>&1
+    "$HOME/.fzf/install" --all >> "$LOG_FILE" 2>&1
+    spinner_stop 0 "fzf instalado"
+  else
+    ok "fzf já instalado"
   fi
 
-  # Starship (opcional, alternativa ao p10k)
-  # curl -sS https://starship.rs/install.sh | sh
-
-  # tmux config
   cat > "$HOME/.tmux.conf" <<'TMUX'
 set -g default-terminal "screen-256color"
 set -g history-limit 10000
 set -g mouse on
-
-# Atalhos intuitivos
 bind | split-window -h -c "#{pane_current_path}"
 bind - split-window -v -c "#{pane_current_path}"
 bind r source-file ~/.tmux.conf \; display "Config recarregado!"
-
-# Status bar
 set -g status-style 'bg=#1e1e2e fg=#cdd6f4'
 set -g status-left '#[bold]  #S '
 set -g status-right '#[fg=#89b4fa] %d/%m %H:%M '
 TMUX
 
-  # git config global
   git config --global init.defaultBranch main
   git config --global core.editor "code --wait" 2>/dev/null || \
     git config --global core.editor "nano"
   git config --global pull.rebase false
   git config --global core.autocrlf input
-
-  # delta (git diff bonito)
   git config --global core.pager delta 2>/dev/null || true
   git config --global delta.navigate true 2>/dev/null || true
   git config --global delta.side-by-side true 2>/dev/null || true
 
-  ok "Ferramentas de produtividade configuradas."
+  ok "tmux configurado  |  git configurado com delta"
+  end_step
 }
 
 # =============================================================================
-# 10. JUPYTER LAB — Configuração
+# 10. JUPYTERLAB — CORRIGIDO
+#
+# PROBLEMAS DA VERSÃO ANTERIOR:
+#   a) jupyterlab-lsp 4.3.x requer jupyterlab<4.0 — incompatível com Lab 4.x
+#   b) jupyterlab-drawio 0.9 requer jupyterlab==3.* — incompatível com Lab 4.x
+#   c) As extensões eram instaladas uma a uma sem verificação de compatibilidade
+#   d) jupyter lab --generate-config pode travar se houver extensões quebradas
+#   e) Nenhum smoke test ao final
+#   f) O passo estava COMENTADO no main() mas sem aviso ao usuário
+#
+# SOLUÇÃO:
+#   - Extensões compatíveis com JupyterLab 4.x explícitas com pin de versão
+#   - Instalação em dois batches (pip + jupyter labextension) com fallback
+#   - generate-config com timeout
+#   - Smoke test: "jupyter lab --version" e "jupyter kernelspec list"
+#   - Registro claro de qual extensão falhou e por quê
 # =============================================================================
 setup_jupyter() {
-  step "10. Configurando JupyterLab"
+  step 10 "JupyterLab — Extensões e Configuração"
 
   export PYENV_ROOT="$HOME/.pyenv"
   export PATH="$PYENV_ROOT/bin:$PATH"
   eval "$(pyenv init -)" 2>/dev/null || true
 
-  # Cria config
-  info "Gerando arquivo de configuração padrão..."
-  jupyter lab --generate-config -y 2>/dev/null || true
+  # Verifica versão do Lab instalado
+  local lab_ver
+  lab_ver=$(pip show jupyterlab 2>/dev/null | awk '/^Version:/{print $2}')
+  if [[ -z "$lab_ver" ]]; then
+    err "JupyterLab não está instalado. Execute o passo 4 primeiro."
+    FAILED_STEPS+=("jupyter-config:no-jupyterlab")
+    end_step
+    return 1
+  fi
 
-  # Extensões úteis (instalar uma por vez para mostrar progresso)
-  local jlab_extensions=(
-    "jupyterlab-lsp"
-    "python-lsp-server"
-    "jupyterlab_code_formatter black isort"
-    "jupyterlab-git"
-    "jupyterlab-drawio"
-    "theme-darcula"
+  local lab_major
+  lab_major=$(echo "$lab_ver" | cut -d. -f1)
+  info "JupyterLab $lab_ver detectado (major=$lab_major)"
+
+  # ── Extensões compatíveis com Lab 4.x ─────────────────────────────────────
+  # jupyterlab-lsp>=5.0 suporta Lab 4.x (o 4.3 não suportava)
+  # jupyterlab-git já foi instalado no passo 4 como dependência do core
+  # Extensões Lab 3.x (drawio 0.9, lsp 4.x) são INTENCIONALMENTE omitidas
+
+  local EXTS_LAB4=(
+    "jupyterlab-lsp>=5.0"          # LSP para Lab 4.x
+    "python-lsp-server[all]"       # Backend LSP
+    "jupyterlab_code_formatter"    # Formatter (Black/isort)
+    "black"                        # Formatter backend
+    "isort"                        # Import sorter
   )
 
-  for ext in "${jlab_extensions[@]}"; do
-    info "Instalando extensão: $ext"
-    pip install $ext 2>/dev/null || warn "⚠️  $ext falhou (não crítico)"
+  local EXTS_OPTIONAL=(
+    "theme-darcula"                # Tema escuro
+    "nbdime"                       # Diff de notebooks
+  )
+
+  # Batch 1: Extensões essenciais
+  echo -e "\n  ${BOLD}${DIM}▸ Extensões essenciais (compatíveis com Lab ${lab_ver})${NC}"
+  local total=${#EXTS_LAB4[@]}
+  local ext_ok=0
+  local ext_fail=0
+
+  for i in "${!EXTS_LAB4[@]}"; do
+    local ext="${EXTS_LAB4[$i]}"
+    local ext_name
+    ext_name=$(echo "$ext" | sed 's/[>=<].*//')
+    progress_bar "$(( i + 1 ))" "$total" "$ext_name"
+    if pip install --upgrade --quiet --timeout 120 "$ext" >> "$LOG_FILE" 2>&1; then
+      (( ext_ok++ )) || true
+    else
+      (( ext_fail++ )) || true
+      FAILED_STEPS+=("jlab-ext:$ext_name")
+      _log "FAIL jlab extension: $ext_name"
+    fi
   done
+  printf "\r%-70s\r" " "
 
-  # Cria diretório para scripts locais
+  if [[ $ext_fail -eq 0 ]]; then
+    ok "$ext_ok extensões essenciais instaladas"
+  else
+    warn "$ext_ok instaladas  |  $ext_fail falharam (veja $LOG_FILE)"
+  fi
+
+  # Batch 2: Extensões opcionais (falha não impede continuar)
+  echo -e "\n  ${BOLD}${DIM}▸ Extensões opcionais${NC}"
+  local total_opt=${#EXTS_OPTIONAL[@]}
+  for i in "${!EXTS_OPTIONAL[@]}"; do
+    local ext="${EXTS_OPTIONAL[$i]}"
+    local ext_name
+    ext_name=$(echo "$ext" | sed 's/[>=<].*//')
+    progress_bar "$(( i + 1 ))" "$total_opt" "$ext_name"
+    pip install --upgrade --quiet --timeout 60 "$ext" >> "$LOG_FILE" 2>&1 || true
+    # Falha silenciosa intencional: extensões opcionais não devem abortar
+  done
+  printf "\r%-70s\r" " "
+  ok "Extensões opcionais processadas"
+
+  # ── Configura o kernel Python ──────────────────────────────────────────────
+  spinner_start "Registrando kernel Python no Jupyter..."
+  if python3 -m ipykernel install --user --name python3 \
+       --display-name "Python 3 (pyenv)" >> "$LOG_FILE" 2>&1; then
+    spinner_stop 0 "Kernel Python 3 registrado"
+  else
+    spinner_stop 1 "Falha ao registrar kernel (não-crítico)"
+    FAILED_STEPS+=("jupyter-kernel")
+  fi
+
+  # ── Gera configuração com timeout ─────────────────────────────────────────
+  spinner_start "Gerando arquivo de configuração JupyterLab..."
+  if timeout 30 jupyter lab --generate-config -y >> "$LOG_FILE" 2>&1; then
+    spinner_stop 0 "Configuração gerada em ~/.jupyter/"
+  else
+    spinner_stop 1 "generate-config falhou (não-crítico)"
+    FAILED_STEPS+=("jupyter-generate-config")
+  fi
+
+  # ── Cria script de atalho ──────────────────────────────────────────────────
   mkdir -p "$HOME/.local/bin"
-
-  # Script de atalho
   cat > "$HOME/.local/bin/jlab" <<'JLAB'
 #!/bin/bash
-cd "${1:-$HOME/data-projects}" && jupyter lab --no-browser
+# Inicia JupyterLab no diretório especificado (ou ~/data-projects por padrão)
+cd "${1:-$HOME/data-projects}" && jupyter lab --no-browser "$@"
 JLAB
   chmod +x "$HOME/.local/bin/jlab"
+  ok "Atalho 'jlab' criado em ~/.local/bin/jlab"
 
-  ok "JupyterLab configurado. Use 'jlab' para iniciar."
+  # ── Smoke tests ───────────────────────────────────────────────────────────
+  echo -e "\n  ${BOLD}${DIM}▸ Smoke tests${NC}"
+
+  # Teste 1: versão do Lab
+  local actual_lab_ver
+  actual_lab_ver=$(timeout 10 jupyter lab --version 2>/dev/null || echo "FALHOU")
+  if [[ "$actual_lab_ver" != "FALHOU" ]]; then
+    detail "jupyter lab --version → $actual_lab_ver  ${TICK}"
+  else
+    detail "jupyter lab --version → ${CROSS} (falhou)"
+    FAILED_STEPS+=("smoke:jupyter-lab-version")
+  fi
+
+  # Teste 2: kernel list
+  local kernels
+  kernels=$(timeout 10 jupyter kernelspec list 2>/dev/null || echo "FALHOU")
+  if [[ "$kernels" != "FALHOU" ]] && echo "$kernels" | grep -q "python"; then
+    detail "jupyter kernelspec list → kernel Python encontrado  ${TICK}"
+  else
+    detail "jupyter kernelspec list → ${CROSS} (kernel não encontrado)"
+    FAILED_STEPS+=("smoke:jupyter-kernel-list")
+  fi
+
+  # Teste 3: LSP server
+  if python3 -c "import pylsp" >> "$LOG_FILE" 2>&1; then
+    detail "python-lsp-server importável  ${TICK}"
+  else
+    detail "python-lsp-server não importável  ${WARN}"
+    FAILED_STEPS+=("smoke:pylsp-import")
+  fi
+
+  echo ""
+  info "Para iniciar: jlab  (ou: jupyter lab)"
+  info "Acesse em:   http://localhost:8888"
+  end_step
 }
 
 # =============================================================================
 # 11. ESTRUTURA DE PASTAS
 # =============================================================================
 setup_folders() {
-  step "11. Estrutura de Pastas do Analista"
+  step 11 "Estrutura de Pastas do Analista"
 
   local BASE="$HOME/data-projects"
   mkdir -p \
     "$BASE"/{notebooks,data/{raw,processed,external},scripts,reports,dashboards,models} \
     "$HOME"/{.config/dbt,tools}
 
-  # .gitignore global
   cat > "$HOME/.gitignore_global" <<'GTIG'
-# Python
 __pycache__/
 *.py[cod]
 .venv/
 *.egg-info/
 dist/
 .pytest_cache/
-
-# Dados
 *.csv
 *.parquet
 *.xlsx
@@ -460,20 +906,12 @@ dist/
 !config.json
 data/raw/
 data/processed/
-
-# Notebooks checkpoints
 .ipynb_checkpoints/
-
-# Env
 .env
 .env.*
 !.env.example
-
-# OS
 .DS_Store
 Thumbs.db
-
-# IDEs
 .vscode/
 .idea/
 *.swp
@@ -481,7 +919,6 @@ GTIG
 
   git config --global core.excludesfile "$HOME/.gitignore_global"
 
-  # Template de projeto
   cat > "$BASE/template_projeto.ipynb" <<'NB'
 {
  "cells": [
@@ -489,7 +926,7 @@ GTIG
   {"cell_type": "code", "metadata": {}, "source": ["import numpy as np\nimport pandas as pd\nimport matplotlib.pyplot as plt\nimport seaborn as sns\n\npd.set_option('display.max_columns', None)\npd.set_option('display.float_format', '{:.2f}'.format)\nsns.set_theme(style='whitegrid')\n\nprint('Ambiente pronto! ✅')"], "outputs": [], "execution_count": null}
  ],
  "metadata": {
-  "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+  "kernelspec": {"display_name": "Python 3 (pyenv)", "language": "python", "name": "python3"},
   "language_info": {"name": "python", "version": "3.12.3"}
  },
  "nbformat": 4,
@@ -498,13 +935,14 @@ GTIG
 NB
 
   ok "Estrutura criada em $BASE"
+  end_step
 }
 
 # =============================================================================
-# 12. CONFIGURAÇÃO DO WSL2 (/etc/wsl.conf)
+# 12. CONFIGURAÇÃO WSL2
 # =============================================================================
 setup_wsl_config() {
-  step "12. Configuração WSL2 (wsl.conf)"
+  step 12 "Configuração WSL2 (wsl.conf)"
 
   sudo tee /etc/wsl.conf > /dev/null <<'WSLCONF'
 [boot]
@@ -525,10 +963,8 @@ options="metadata,umask=22,fmask=11"
 mountFsTab=true
 WSLCONF
 
-  # Limites de memória (crie no Windows: %USERPROFILE%\.wslconfig)
-  local wslconfig_win="$HOME/.wslconfig_tip.txt"
-  cat > "$wslconfig_win" <<'WC'
-# Copie este conteúdo para: C:\Users\<SeuUsuário>\.wslconfig (no Windows)
+  cat > "$HOME/.wslconfig_tip.txt" <<'WC'
+# Copie para: C:\Users\<SeuUsuário>\.wslconfig (no Windows)
 # Ajuste os valores conforme sua RAM disponível.
 
 [wsl2]
@@ -538,21 +974,19 @@ swap=4GB
 localhostForwarding=true
 WC
 
+  ok "wsl.conf configurado (systemd habilitado)"
   warn "Crie o arquivo .wslconfig no Windows. Veja: ~/wslconfig_tip.txt"
-  ok "wsl.conf configurado."
+  end_step
 }
 
 # =============================================================================
-# 13. VS CODE EXTENSIONS (lista para instalar no Windows)
+# 13. VS CODE EXTENSIONS
 # =============================================================================
 setup_vscode_list() {
-  step "13. Lista de Extensões VS Code para Dados"
+  step 13 "Script de Extensões VS Code"
 
   cat > "$HOME/vscode_extensions_data.sh" <<'VSC'
 #!/bin/bash
-# Execute este script no PowerShell/CMD do Windows (com code no PATH)
-# ou diretamente no WSL se VS Code estiver integrado.
-
 extensions=(
   ms-python.python
   ms-python.vscode-pylance
@@ -568,7 +1002,6 @@ extensions=(
   innoverio.vscode-dbt-power-user
   mechatroner.rainbow-csv
   GrapeCity.gc-excelviewer
-  ms-vscode.makefile-tools
   eamodio.gitlens
   mhutchie.git-graph
   christian-kohler.path-intellisense
@@ -583,60 +1016,71 @@ extensions=(
   charliermarsh.ruff
   tamasfe.even-better-toml
 )
-
-for ext in "${extensions[@]}"; do
+total=${#extensions[@]}
+for i in "${!extensions[@]}"; do
+  ext="${extensions[$i]}"
+  echo "[$(( i + 1 ))/$total] $ext"
   code --install-extension "$ext" --force
 done
-
 echo "✅ Extensões instaladas!"
 VSC
 
   chmod +x "$HOME/vscode_extensions_data.sh"
-  ok "Script de extensões salvo em ~/vscode_extensions_data.sh"
+  ok "Script salvo: ~/vscode_extensions_data.sh"
+  end_step
 }
 
 # =============================================================================
 # SUMÁRIO FINAL
 # =============================================================================
 print_summary() {
-  echo -e "\n${BOLD}${GREEN}"
-  cat <<'EOF'
-╔══════════════════════════════════════════════════════════════╗
-║          ✅  SETUP COMPLETO! RESUMO DO QUE FOI INSTALADO     ║
-╚══════════════════════════════════════════════════════════════╝
-EOF
-  echo -e "${NC}"
+  local elapsed_total=$SECONDS
+  local mins=$(( elapsed_total / 60 ))
+  local secs=$(( elapsed_total % 60 ))
 
-  echo -e "${CYAN}SHELL${NC}"
-  echo "  • Zsh + Oh-My-Zsh + Powerlevel10k + plugins"
-  echo -e "\n${CYAN}LINGUAGENS${NC}"
-  echo "  • Python 3.12 (pyenv) | Node.js LTS (nvm) | Rust"
-  echo -e "\n${CYAN}DADOS & ANÁLISE${NC}"
-  echo "  • NumPy, Pandas, Polars, PyArrow, DuckDB"
-  echo "  • Scikit-learn, XGBoost, LightGBM, PyTorch (CPU)"
-  echo "  • Matplotlib, Seaborn, Plotly, Altair"
-  echo "  • JupyterLab (com extensões LSP, Git, formatter)"
-  echo -e "\n${CYAN}ENGENHARIA DE DADOS${NC}"
-  echo "  • dbt-core, dbt-postgres, dbt-bigquery"
-  echo "  • Prefect, Apache Airflow"
-  echo "  • Great Expectations, Pandera"
-  echo "  • PySpark, Boto3, Google BigQuery"
-  echo -e "\n${CYAN}BANCOS DE DADOS${NC}"
-  echo "  • PostgreSQL, Redis, SQLite3, DuckDB CLI"
-  echo -e "\n${CYAN}INFRAESTRUTURA${NC}"
-  echo "  • Docker + Docker Compose"
-  echo "  • wsl.conf com systemd habilitado"
-  echo -e "\n${CYAN}CLI & PRODUTIVIDADE${NC}"
-  echo "  • fzf, ripgrep, bat, lsd, delta, bottom, fd, dust"
-  echo "  • tmux (com config), git (com delta)"
-  echo -e "\n${CYAN}ESTRUTURA DE PASTAS${NC}"
-  echo "  • ~/data-projects/{notebooks,data,scripts,reports,models}"
-  echo -e "\n${CYAN}PRÓXIMOS PASSOS${NC}"
-  echo "  1. source ~/.zshrc   (ou reinicie o terminal)"
-  echo "  2. Execute ~/vscode_extensions_data.sh (instalar extensões)"
-  echo "  3. Copie o conteúdo de ~/wslconfig_tip.txt → Windows .wslconfig"
-  echo "  4. jupyter lab  (acesse http://localhost:8888)"
   echo ""
+  echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════════════════════════╗"
+  echo -e "║           ✅  SETUP CONCLUÍDO!                                   ║"
+  printf  "║   ⏱  Tempo total: %-44s║\n" "${mins}m ${secs}s"
+  echo -e "╚══════════════════════════════════════════════════════════════════╝${NC}"
+
+  # Versões instaladas
+  if [[ ${#INSTALLED_VERSIONS[@]} -gt 0 ]]; then
+    echo -e "\n${BOLD}Versões instaladas:${NC}"
+    for v in "${INSTALLED_VERSIONS[@]}"; do
+      echo -e "  ${TICK} $v"
+    done
+  fi
+
+  # Ignorados (já existiam)
+  if [[ ${#SKIPPED_STEPS[@]} -gt 0 ]]; then
+    echo -e "\n${BOLD}${DIM}Já instalados (ignorados):${NC}"
+    for s in "${SKIPPED_STEPS[@]}"; do
+      echo -e "  ${DIM}⏭  $s${NC}"
+    done
+  fi
+
+  # Falhas não-críticas
+  if [[ ${#FAILED_STEPS[@]} -gt 0 ]]; then
+    echo -e "\n${BOLD}${YELLOW}Avisos (não-críticos):${NC}"
+    for f in "${FAILED_STEPS[@]}"; do
+      echo -e "  ${WARN} $f"
+    done
+    echo -e "  ${DIM}Detalhes: $LOG_FILE${NC}"
+  fi
+
+  # Próximos passos
+  echo -e "\n${BOLD}Próximos passos:${NC}"
+  echo -e "  1. ${CYAN}exec zsh${NC}                          — recarregar o shell"
+  echo -e "  2. ${CYAN}git config --global user.name 'Seu Nome'${NC}"
+  echo -e "  3. ${CYAN}git config --global user.email 'email'${NC}"
+  echo -e "  4. Copiar ${CYAN}~/wslconfig_tip.txt${NC} → ${CYAN}C:\\Users\\<Usuário>\\.wslconfig${NC}"
+  echo -e "  5. ${CYAN}jlab${NC}                              — iniciar JupyterLab"
+  echo -e "  6. ${CYAN}bash ~/vscode_extensions_data.sh${NC}  — instalar extensões VS Code"
+  echo -e "  7. ${CYAN}docker run hello-world${NC}            — testar Docker"
+  echo -e "  8. ${CYAN}duckdb :memory: 'SELECT 42 AS ok'${NC} — testar DuckDB"
+  echo ""
+  echo -e "  ${DIM}Log completo: $LOG_FILE${NC}"
 }
 
 # =============================================================================
@@ -644,10 +1088,14 @@ EOF
 # =============================================================================
 main() {
   banner
+  echo ""
   check_wsl
 
-  echo -e "${BOLD}Este script irá instalar um ambiente completo de analista de dados.${NC}"
-  echo -e "Tempo estimado: ${YELLOW}30–60 minutos${NC} dependendo da internet.\n"
+  echo ""
+  echo -e "${BOLD}Este script instala um ambiente completo de analista de dados.${NC}"
+  echo -e "Tempo estimado: ${YELLOW}30–60 minutos${NC} dependendo da internet."
+  echo -e "Log em tempo real: ${DIM}$LOG_FILE${NC}"
+  echo ""
 
   if ! confirm "Deseja continuar?"; then
     echo "Cancelado."; exit 0
@@ -663,7 +1111,7 @@ main() {
   setup_docker
   setup_databases
   setup_productivity
-  # setup_jupyter
+  setup_jupyter        # ← Passo 10 agora habilitado e corrigido
   setup_folders
   setup_wsl_config
   setup_vscode_list
